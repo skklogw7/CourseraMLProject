@@ -1,0 +1,143 @@
+#Practical Machine Learning Project - Data Analysis Report
+###By Kurt Schuepfer
+
+##Introduction
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it.
+
+In this project, we will use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants to predict the manner in which they did the exercise. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset). 
+
+##Data Preprocessing
+```{r}
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(randomForest)
+library(corrplot)
+```
+
+```{r}
+##Download Data
+trainUrl <-"https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+testUrl <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+trainFile <- "./courseraMLData/pml-training.csv"
+testFile  <- "./courseraMLData/pml-testing.csv"
+
+if (!file.exists("./courseraMLData")) {
+  dir.create("./courseraMLData")
+}
+
+if (!file.exists(trainFile)) {
+  download.file(trainUrl, destfile=trainFile, method="curl")
+}
+
+if (!file.exists(testFile)) {
+  download.file(testUrl, destfile=testFile, method="curl")
+}
+```
+
+```{r}
+##Read Data
+trainRaw <- read.csv("./courseraMLData/pml-training.csv")
+testRaw <- read.csv("./courseraMLData/pml-testing.csv")
+dim(trainRaw)
+dim(testRaw)
+
+##Check how many columns contain full data... here we see 93.
+table(colSums(is.na(trainRaw)))
+```
+
+```{r}
+##Make sure dependent/outcome variable exists ("classe" column)
+colnames(trainRaw)
+```
+
+
+##Data Cleaning
+
+The first 6 columns are irrelevant to the analysis. Delete these.
+```{r}
+#Delete first 6 columns on both training and test sets
+trainRaw <- trainRaw[, 7:160]
+testRaw <- testRaw[, 7:160]
+```
+
+Next, we will delete all columns with missing data. Note: this is not a preferred method in most cases. Normally I would not delete an entire column if it had around less than 10% missing data (just as a personal rule of thumb). This, of course, however, depends on the overall sample size. In this data set, as you can see from the table results below, there are 87 columns with no missing data and 67 columns with 19216 rows of missing data (~98% of the rows). Hence, we can safely delete all 67 of these columns. In other data sets, however, many columns might only have a few missing data points. In those cases, there are other ways to handle missing data than a clean removal of the column. But for present purposes, we will simply remove all of the missing data columns.
+
+```{r}
+table(colSums(is.na(trainRaw)))
+```
+
+
+```{r}
+##Remove columns with missing data
+trainRaw <- trainRaw[, colSums(is.na(trainRaw)) == 0]
+testRaw <- testRaw[, colSums(is.na(testRaw)) == 0]
+```
+
+Next, eliminate all variables that do not vary meaningfully. Variables with "near zero variance" should have no bearing on the result. Delete these.
+```{r}
+#Delete columns with near zero variance for both training and test sets
+zeroVarianceTrain <- nearZeroVar(trainRaw, saveMetrics=TRUE)
+trainRaw <- trainRaw[,zeroVarianceTrain$nzv==FALSE]
+
+zeroVarianceTest<- nearZeroVar(testRaw,saveMetrics=TRUE)
+testRaw <- testRaw[,zeroVarianceTest$nzv==FALSE]
+```
+
+##Data Splitting
+```{r}
+##Split training data into a train and test set (60/40 split)
+set.seed(192837465)
+trainIndex <- createDataPartition(trainRaw$classe, p=0.60, list=FALSE)
+trainRawTrain  <- trainRaw[trainIndex,]
+trainRawTest  <- trainRaw[-trainIndex,]
+dim(trainRawTrain)
+dim(trainRawTest)
+```
+
+##Data Modeling
+
+###Model the data using a Random Forest algorithm.
+```{r}
+set.seed(192837465)
+rfModel <- randomForest(classe~., data=trainRawTrain, importance=TRUE, ntree=100)
+```
+
+Then, fit the model to the testing subset of the train data (from the 60/40 split).
+```{r}
+rfPredict <- predict(rfModel, trainRawTest)
+confusionMatrix(trainRawTest$classe, rfPredict)
+```
+
+Calculate accuracy and out of sample error
+```{r}
+acc <- postResample(rfPredict, trainRawTest$classe)
+acc
+oose <- 1 - as.numeric(confusionMatrix(trainRawTest$classe, rfPredict)$overall[1])
+oose
+```
+
+###Model the data using a decision tree
+```{r}
+set.seed(192837465)
+decTreeModel <- rpart(classe ~ ., data=trainRawTrain, method="class")
+decTreePredict <- predict(decTreeModel, trainRawTest, type = "class")
+confusionMatrixTree <- confusionMatrix(decTreePredict, trainRawTest$classe)
+confusionMatrixTree
+```
+
+Calculate accuracy and out of sample error
+```{r}
+acc <- postResample(decTreePredict, trainRawTest$classe)
+acc
+oose <- 1 - as.numeric(confusionMatrix(trainRawTest$classe, decTreePredict)$overall[1])
+oose
+```
+
+We can see that the Random Forest model provided a better fit to the data than the Decision Tree model (with respective accuracies of .996 and .813). Thus, we will use the Random Forest model in the next step (for making predictions on the actual test set data). 
+
+#Predict on the Test Set Data
+```{r}
+rfPredictTest <- predict(rfModel, testRaw, type = "class")
+rfPredictTest
+```
